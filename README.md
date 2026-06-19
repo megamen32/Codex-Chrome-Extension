@@ -2,6 +2,8 @@
 
 > **OpenAI Codex Browser Agent v1.1.5** — полный реверс-инжиниринг Chrome-расширения для управления браузером через AI.
 
+**📖 [English version](README.en.md)**
+
 ## Что это
 
 Chrome-расширение от OpenAI, позволяющее AI-агенту (Codex / ChatGPT) управлять вашим браузером: кликать, печатать, скроллить, переходить по ссылкам, делать скриншоты и выполнять JavaScript. Расширение недоступно в Europe, но его можно установить вручную.
@@ -283,13 +285,15 @@ font-src 'self' https://cdn.openai.com
 
 ## ⚠️ Как установить (Europe)
 
-1. Скачайте файлы из папки `extension/`
-2. Откройте `chrome://extensions/`
-3. Включите **Developer mode** (в правом верхнем углу)
-4. Нажмите **Load unpacked**
-5. Выберите папку `extension/`
-6. Скачайте и установите **Codex Desktop App** от OpenAI
-7. В Codex: **Settings → Computer use → Google Chrome → включить**
+1. Скачайте **ZIP-архив** из [Releases](https://github.com/megamen32/Codex-Chrome-Extension/releases)
+2. Распакуйте архив в любую папку
+3. Откройте `chrome://extensions/`
+4. Включите **Developer mode** (в правом верхнем углу)
+5. Нажмите **Load unpacked**
+6. Выберите распакованную папку `extension`
+7. Скачайте и установите **Codex Desktop App** от OpenAI
+8. В Codex: **Settings → Computer use → Any App** — включить
+9. В Codex: **Settings → Computer use → Google Chrome** — включить
 
 ## Лицензия
 
