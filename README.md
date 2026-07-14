@@ -1,12 +1,138 @@
 # 🔍 Codex Chrome Extension — Reverse Engineering
 
-> **OpenAI Codex Browser Agent v1.1.5** — полный реверс-инжиниринг Chrome-расширения для управления браузером через AI.
+> **OpenAI Codex / ChatGPT Browser Agent** — полный реверс-инжиниринг Chrome-расширения для управления браузером через AI. Анализ двух версий: **Codex v1.1.5** (popup-based) и **ChatGPT v1.2.27203.26575** (side panel + Playwright-based).
 
 **📖 [English version](README.en.md)**
 
 ## Что это
 
 Chrome-расширение от OpenAI, позволяющее AI-агенту (Codex / ChatGPT) управлять вашим браузером: кликать, печатать, скроллить, переходить по ссылкам, делать скриншоты и выполнять JavaScript. Расширение недоступно в Europe, но его можно установить вручную.
+
+## ⚡ Что нового в ChatGPT v1.2.27203.26575 (vs Codex v1.1.5)
+
+Расширение пережило **мажорный рефакторинг** — из компактного popup-инструмента (~552 KB) превратилось в полноценный **браузерный агент-фреймворк** (~93 MB). Архитектура сменилась полностью: всё, что раньше было в `background.js`, теперь разнесено между `background.js` (тонкий диспетчер) и `codex-sidepanel/` (тяжёлый React-интерфейс).
+
+### Новые capabilities (top-level API)
+
+| Capability | Что делает |
+|---|---|
+| **`cdp`** | Прямой Chrome DevTools Protocol — extension пробрасывает сырые CDP-команды (`Target.sendMessage`, `DOM.getDocument` и т.д.) к любой вкладке с возможностью подписки на debugger events. |
+| **`playwright` (locator API)** | Полноценный Playwright-совместимый locator API: `locator.click()`, `dblclick()`, `selectOption()`, `fill()`, `type()`, `press()`, `setChecked()`, `waitFor()`, `textContent()`, `innerText()`, `getAttribute()`, `isVisible()`, `isEnabled()`, `count()`, `all()`, `downloadMedia()`, `first()`, `last()`, `nth()`, `and()`, `or()`, `filter()`, `getByRole()`, `getByText()`, `getByLabel()`, `getByPlaceholder()`, `getByTestId()`. Это серьёзный скачок — был простой клик по координатам, стал селекторный API. |
+| **`webmcp`** | Инвокация page-defined tools через `navigator.modelContext` — расширение умеет вызывать MCP-тулы, зарегистрированные на странице. Это для интеграции с AI-агентами, которые публикуют свои tools прямо в браузере. |
+| **`botDetection`** | Репортинг бот-детекции: extension может сообщить нативному хосту, что на странице CAPTCHA / access denied / challenge loop. Нативный хост может среагировать (например, попросить пользователя помочь). |
+| **`browserAuth`** | Secure auth handoff — extension передаёт нативному хосту запрос на ввод credentials (origin, reason, expires_at ≤ 5 min, fields, submit action), хост рендерит UI и вводит данные безопасно. Команда `tab_browser_auth_handoff` с structured `fields` массивом. |
+| **`pageAssets`** | Сбор ассетов страницы (fonts/images/stylesheets/videos) в локальный артефакт. Сначала `tab_page_assets_list` (получить инвентарь), затем `tab_page_assets_bundle` (скачать выбранные в локальный manifest с `directoryPath`, `manifestPath`, `summary`). |
+| **`visibility`** | Управление видимостью headless-браузера: `browser_visibility_get` / `browser_visibility_set` (true/false). Позволяет агенту работать в фоне, не мешая пользователю. |
+| **`viewport`** | Управление размером viewport: `browser_viewport_set` (width, height) / `browser_viewport_reset`. Для responsive-тестирования и эмуляции device size. |
+
+### Архитектурные изменения
+
+| | Codex v1.1.5 | ChatGPT v1.2.27203.26575 |
+|---|---|---|
+| **Размер** | 552 KB | 93 MB |
+| **`background.js`** | 229 KB, всё в одном файле | 180 KB, тонкий диспетчер |
+| **UI** | Popup (popup.html, React 19, ~1 файл) | Полноценный **side panel** (`codex-sidepanel/index.html`), 1583 чанка |
+| **Permissions** | 11 | +`sidePanel`, +`webNavigation`; −`readingList`, −`downloads.ui` |
+| **Минимальный Chrome** | не указан | 116 |
+| **`side_panel` API** | нет | `default_path: "codex-sidepanel/index.html"` |
+| **Commands** | нет | `Cmd+Shift+Period` / `Ctrl+Shift+Period` → open side panel |
+| **Optional permissions** | нет | `downloads.open` |
+| **Connect-src CSP** | localhost only | +`https://ab.chatgpt.com`, +`https://chatgpt.com` |
+| **Локализация** | en only | 118 locale-файлов (ru-RU, en-GB, te-IN, my-MM и т.д.) |
+| **Code highlighting** | нет | shiki с 24+ языками (ada, abap, angular, apl, asciidoc, asm, astro...) и 194 темами |
+| **PDF render** | нет | `pdf.worker.min.mjs` (1 MB) |
+| **IDE/terminal icons** | нет | 27 шт. в `codex-sidepanel/apps/` (vscode, cursor, zed, warp, iterm2, intellij и т.д.) |
+| **Сторонние системы** | popup + native host | popup → side panel + native host + **JSON-RPC 2.0 protocol** + **WXT storage framework** + Zod schema validation |
+
+### Storage / infrastructure
+
+В новой версии используется:
+- **JSON-RPC 2.0** для нативного хоста (раньше — кастомный протокол)
+- **WXT storage framework** (`@wxt-dev/storage`) — миграции версий, метаданные, watch
+- **Zod** для валидации всех message schemas
+- **Playwright-style locator API** в client side
+- **appgen** — генератор приложений (видны в чанках: `appgen-access`, `appgen-settings-dialog`, `appgen-share-dialog`)
+
+### Команды (новый transport)
+
+В новой версии все capability-команды идут через единый dispatcher с типизацией. Старая версия использовала `case` в switch — простая логика, ~70 команд. Новая — JSON-RPC с `commandType: () => "..."` и schema validation, **7 top-level capabilities с подкомандами**:
+- `tab_cdp_call`, `tab_cdp_events`
+- `tab_browser_auth_handoff`
+- `tab_bot_detection_report`
+- `tab_page_assets_list`, `tab_page_assets_bundle`
+- `browser_visibility_get`, `browser_visibility_set`
+- `browser_viewport_set`, `browser_viewport_reset`
+- `tab_webmcp_invoke_tool`, `tab_webmcp_list_tools`
+
+### Manifest: прямое сравнение
+
+```diff
+{
+  "name": "Codex" → "ChatGPT"
+  "description": "Control Chrome with Codex." → "Control Chrome with ChatGPT."
+  "version": "1.1.5" → "1.2.27203.26575"
+  
+  "action": {
+    "default_popup": "popup.html",     // ← удалён
+    "default_icon": ...,                
+    "default_title": "Codex" → "ChatGPT"
+  },
+  
++ "minimum_chrome_version": "116",
++ "commands": { "open-codex-side-panel": { "suggested_key": "Cmd+Shift+Period" } },
++ "optional_permissions": ["downloads.open"],
++ "side_panel": { "default_path": "codex-sidepanel/index.html" },
+  
+  "permissions": [
+-   "downloads.ui",
+-   "readingList",
++   "sidePanel",
++   "webNavigation",
+    ...
+  ],
+  
+  "content_security_policy": {
+    "extension_pages": "...; connect-src ... https://ab.chatgpt.com https://chatgpt.com; ..."
+  }
+}
+```
+
+### Файловая структура
+
+**Codex v1.1.5 (552 KB):**
+```
+extension/
+├── background.js (229 KB)
+├── popup.html
+├── chunks/popup-CTe__03-.js
+├── content-scripts/codex.js
+├── assets/popup-DzS88qVA.css
+├── _metadata/verified_contents.json
+├── images/{icon16,32,48,128}.png, cursor-chat.png
+└── manifest.json
+```
+
+**ChatGPT v1.2.27203.26575 (93 MB):**
+```
+extension/
+├── background.js (180 KB)               # тонкий диспетчер
+├── microphone-permission.html           # новый — для диктовки
+├── chunks/microphone-permission-Cdowufbn.js
+├── codex-sidepanel/                     # новый — полный UI
+│   ├── index.html
+│   ├── apps/ (27 IDE/terminal иконок)
+│   └── assets/ (1583 чанка: shiki, темы, локали, React-роуты...)
+├── images/{icon16,32,128}.png, cursor-chat.png
+└── manifest.json
+```
+
+### Что это значит для пользователя
+
+- **Расширение из popup'a превратилось в fullscreen side panel** — больше места, больше контролов, thread-based chat с вкладками (видны `thread-page`, `app-shell-tab-controller`, `thread-context`).
+- **Появилась поддержка микрофона** для голосовой диктовки (`microphone-permission.html` + `downloads.open`).
+- **Multi-tab agent control** — capability `cdp` и `tab_*` префиксы означают, что агент может управлять несколькими вкладками и переключаться между ними.
+- **WebMCP** — расширение нативно работает с MCP-тулами, зарегистрированными на странице (`navigator.modelContext`). Это будущее для AI-агентов в браузере.
+- **Локализация** — теперь не только en, 118 locale-файлов.
 
 ## Архитектура
 
